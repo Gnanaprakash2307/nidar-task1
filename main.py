@@ -1,126 +1,199 @@
 import cv2
 
-# Load maze
+# ==========================================
+# 1. Load image
+# ==========================================
+
 image = cv2.imread("img/maze.png")
 
 if image is None:
     print("Error: Could not load image.")
     exit()
 
-# Grayscale
+# ==========================================
+# 2. Convert to grayscale
+# ==========================================
+
 gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-# Binary image
-_, binary = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY)
+# ==========================================
+# 3. Threshold
+# ==========================================
 
-# Invert binary image
-# Black objects become white
-black_objects = cv2.bitwise_not(binary)
-
-# Find connected components
-num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
-    black_objects,
-    connectivity=8
+_, binary = cv2.threshold(
+    gray,
+    128,
+    255,
+    cv2.THRESH_BINARY
 )
 
-print("Number of components:", num_labels)
+# ==========================================
+# 4. Maze configuration
+# ==========================================
 
-# Store possible small components
-candidates = []
+GRID_ROWS = 20
+GRID_COLS = 20
 
-for i in range(1, num_labels):
+height, width = binary.shape
 
-    x = stats[i, cv2.CC_STAT_LEFT]
-    y = stats[i, cv2.CC_STAT_TOP]
-    w = stats[i, cv2.CC_STAT_WIDTH]
-    h = stats[i, cv2.CC_STAT_HEIGHT]
-    area = stats[i, cv2.CC_STAT_AREA]
+cell_width = width / GRID_COLS
+cell_height = height / GRID_ROWS
 
-    # Ignore very large components
-    if area < 1500 and w < 60 and h < 60:
-        candidates.append({
-            "label": i,
-            "x": x,
-            "y": y,
-            "w": w,
-            "h": h,
-            "area": area
-        })
-
-print("\nSmall component candidates:")
-
-for c in candidates:
-    print(c)
+print("Image size:", width, "x", height)
+print("Cell size:", cell_width, "x", cell_height)
 
 
-# -----------------------------------
-# Find S: closest candidate to top-left
-# -----------------------------------
+# ==========================================
+# 5. Find center of a cell
+# ==========================================
 
-if candidates:
+def cell_center(row, col):
 
-    start = min(
-        candidates,
-        key=lambda c: c["x"] + c["y"]
-    )
+    x = int((col + 0.5) * cell_width)
+    y = int((row + 0.5) * cell_height)
 
-    # -----------------------------------
-    # Find G: closest candidate to bottom-right
-    # -----------------------------------
+    return x, y
 
-    image_height, image_width = binary.shape
 
-    goal = min(
-        candidates,
-        key=lambda c:
-        (image_width - c["x"]) +
-        (image_height - c["y"])
-    )
+# ==========================================
+# 6. Check if two cells are connected
+# ==========================================
 
-    print("\nDetected Start:")
-    print(start)
+def can_move(row1, col1, row2, col2):
 
-    print("\nDetected Goal:")
-    print(goal)
+    x1, y1 = cell_center(row1, col1)
+    x2, y2 = cell_center(row2, col2)
 
-    # Draw results
-    result = image.copy()
+    # Number of points to check between
+    # the two cell centers
+    num_samples = 20
 
-    # Start rectangle
-    cv2.rectangle(
-        result,
-        (start["x"], start["y"]),
-        (
-            start["x"] + start["w"],
-            start["y"] + start["h"]
-        ),
+    for i in range(1, num_samples):
+
+        t = i / num_samples
+
+        x = int(x1 + t * (x2 - x1))
+        y = int(y1 + t * (y2 - y1))
+
+        # Black pixel = wall
+        if binary[y, x] < 128:
+            return False
+
+    return True
+
+
+# ==========================================
+# 7. Test maze connections
+# ==========================================
+
+print("\nTesting cell connections:\n")
+
+for row in range(GRID_ROWS):
+
+    for col in range(GRID_COLS):
+
+        # ------------------------------
+        # Check RIGHT
+        # ------------------------------
+
+        if col < GRID_COLS - 1:
+
+            if can_move(row, col, row, col + 1):
+
+                print(
+                    f"({row},{col}) -> RIGHT -> "
+                    f"({row},{col + 1})"
+                )
+
+        # ------------------------------
+        # Check DOWN
+        # ------------------------------
+
+        if row < GRID_ROWS - 1:
+
+            if can_move(row, col, row + 1, col):
+
+                print(
+                    f"({row},{col}) -> DOWN -> "
+                    f"({row + 1},{col})"
+                )
+
+
+# ==========================================
+# 8. Visualize the grid
+# ==========================================
+
+grid_image = image.copy()
+
+# Draw horizontal grid lines
+
+for row in range(GRID_ROWS + 1):
+
+    y = int(row * cell_height)
+
+    cv2.line(
+        grid_image,
+        (0, y),
+        (width, y),
         (0, 0, 255),
-        3
+        1
     )
 
-    # Goal rectangle
-    cv2.rectangle(
-        result,
-        (goal["x"], goal["y"]),
-        (
-            goal["x"] + goal["w"],
-            goal["y"] + goal["h"]
-        ),
-        (255, 0, 0),
-        3
+
+# Draw vertical grid lines
+
+for col in range(GRID_COLS + 1):
+
+    x = int(col * cell_width)
+
+    cv2.line(
+        grid_image,
+        (x, 0),
+        (x, height),
+        (0, 0, 255),
+        1
     )
 
-    # Display
-    display_size = (600, 600)
-    small_result = cv2.resize(result, display_size)
 
-    cv2.imshow(
-        "Detected Start and Goal",
-        small_result
-    )
+# ==========================================
+# 9. Draw cell centers
+# ==========================================
 
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+for row in range(GRID_ROWS):
 
-else:
-    print("No suitable candidates found.")
+    for col in range(GRID_COLS):
+
+        x, y = cell_center(row, col)
+
+        cv2.circle(
+            grid_image,
+            (x, y),
+            2,
+            (255, 0, 0),
+            -1
+        )
+
+
+# ==========================================
+# 10. Resize for display
+# ==========================================
+
+display_size = (600, 600)
+
+small_grid = cv2.resize(
+    grid_image,
+    display_size
+)
+
+
+# ==========================================
+# 11. Display
+# ==========================================
+
+cv2.imshow(
+    "20x20 Maze Grid",
+    small_grid
+)
+
+cv2.waitKey(0)
+cv2.destroyAllWindows()
